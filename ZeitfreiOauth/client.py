@@ -16,7 +16,7 @@ class DiscordOAuthClient:
         """
         response = requests.get(f"{self.api_base_url}/user/{user_id}", headers=self.headers)
         if response.status_code != 200:
-            raise Exception(f"Failed to get user {user_id}: {response.text}")
+            return None
         return response.json()
 
     def delete_user(self, user_id:int):

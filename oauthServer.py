@@ -1,7 +1,5 @@
-from flask import Flask, redirect, request, jsonify, session, make_response
-import sqlite3
-import requests
-import os 
+import sqlite3, requests, os, hmac, datetime
+from flask import Flask, redirect, request, jsonify, session, make_response, current_app
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -47,6 +45,7 @@ def callback():
 
     save_user_to_db(user, session['token'])    
     add_user_to_server(user_id=user['id'])
+    current_app.logger.info(f"User {user['id']} authenticated successfully.")
     return redirect('/close')
 
 @app.route('/close')
@@ -77,7 +76,8 @@ def get_user(user_id):
                 'username': user[1],
                 'discriminator': user[2],
                 'access_token': user[3],
-                'refresh_token': user[4]
+                'refresh_token': user[4],
+                'expires_at': user[5]
             })
         else:
             return make_response(jsonify({"error": "User not found"}), 404)
@@ -97,6 +97,7 @@ def delete_user(user_id):
             })
         cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
+    current_app.logger.info(f"User {user_id} deleted successfully.")
     return jsonify({"message": f"User {user_id} deleted successfully"})
 
 @app.route('/add_guild', methods=['POST'])
@@ -110,6 +111,8 @@ def add_guild():
         cursor.execute("INSERT OR REPLACE INTO guild (guild_id, unauth_role_id, auth_role_id) VALUES (?, ?, ?)",
                        (data['guild_id'], data['unauth_role'], data['auth_role']))
         conn.commit()
+    
+    current_app.logger.info(f"Guild {data['guild_id']} added successfully.")
     return jsonify({"message": "Guild data added successfully!"})
 
 @app.route('/add_user_to_server/<user_id>', methods=['POST'])
@@ -117,11 +120,12 @@ def call_add_user(user_id):
     if not check_api_key(request):
         return jsonify({"ERROR": "Invalid API key"}), 403
     response = add_user_to_server(user_id=user_id)
+    current_app.logger.info(f"User {user_id} join successfully.")
     return jsonify({"status": response.text}), response.status_code
 
 def check_api_key(request):
     provided_key = request.headers.get('X-API-KEY')
-    return provided_key == API_KEY
+    return hmac.compare_digest(provided_key, API_KEY)
 
 def save_user_to_db(user, token_info):
     with sqlite3.connect("users.db") as conn:
@@ -132,16 +136,53 @@ def save_user_to_db(user, token_info):
                 username TEXT,
                 discriminator TEXT,
                 access_token TEXT,
-                refresh_token TEXT
+                refresh_token TEXT,
+                expires_at TIMESTAMP
             )
         """)
+        # 計算 access_token 的過期時間
+        expires_in = token_info.get('expires_in', 0)
+        expires_at = datetime.datetime.now() + datetime.timedelta(seconds=expires_in)
+        
         cursor.execute(
-            "INSERT OR REPLACE INTO users (id, username, discriminator, access_token, refresh_token) VALUES (?, ?, ?, ?, ?)",
-            (user['id'], user['username'], user['discriminator'], token_info['access_token'], token_info['refresh_token'])
+            "INSERT OR REPLACE INTO users (id, username, discriminator, access_token, refresh_token, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (user['id'], user['username'], user['discriminator'], token_info['access_token'], token_info['refresh_token'], expires_at)
         )
         conn.commit()
 
+def refresh_token_if_expired(user_id):
+    with sqlite3.connect("users.db") as conn:
+        cursor = conn.cursor()
+        user_data = cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        
+        expires_at = user_data[5]
+        # 檢查 access_token 是否已過期
+        if datetime.datetime.now() >= expires_at:
+            data = {
+                'client_id': CLIENT_ID,
+                'client_secret': CLIENT_SECRET,
+                'grant_type': 'refresh_token',
+                'refresh_token': user_data[4]
+            }
+            headers = {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+            response = requests.post('https://discord.com/api/oauth2/token', data=data, headers=headers)
+            response.raise_for_status()
+            new_token_info = response.json()
+
+            # 更新資料庫中的 tokens 並計算新的過期時間
+            expires_in = new_token_info.get('expires_in', 0)
+            expires_at = datetime.datetime.now() + datetime.timedelta(seconds=expires_in)
+            
+            cursor.execute(
+                "UPDATE users SET access_token=?, refresh_token=?, expires_at=? WHERE id=?",
+                (new_token_info['access_token'], new_token_info['refresh_token'], expires_at, user_id)
+            )
+            conn.commit()
+
 def add_user_to_server(user_id:int):
+    refresh_token_if_expired(user_id)
     with sqlite3.connect("users.db") as conn:
         cursor = conn.cursor()
         user_data = cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()

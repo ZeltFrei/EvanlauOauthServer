@@ -7,7 +7,7 @@
 ## 安裝
 
 ```
-pip install git+https://github.com/ZeltFrei/EvanlauOauthServer.git@library
+pip install git+https://github.com/ZeltFrei/EvanlauOauthServer.git
 ```
 
 ## 初始化
@@ -24,7 +24,7 @@ client = DiscordOAuthClient(api_key="YOUR_API_KEY_HERE")
 
 ### 1. 取得使用者
 
-使用`get_user`方法，你可以根據指定的user_id獲得使用者資訊。
+使用`get_user`方法，你可以根據指定的使用者ID獲得使用者資訊，若尋找失敗會返回None。
 
 ```python
 user = client.get_user(1234567890)
@@ -33,16 +33,17 @@ print(user)
 
 ### 2. 刪除使用者
 
-使用`delete_user`方法，你可以根據指定的user_id刪除使用者。
+使用`delete_user`方法，你可以根據指定的使用者ID刪除使用者。
+這僅會將使用者從所有擁有此系統的伺服器中踢除該成員，使用者可以重新進行授權。
 
 ```python
 response = client.delete_user(1234567890)
 print(response)
 ```
 
-### 3. 添加伺服器資訊
+### 3. 添加伺服器認證身分組資訊
 
-使用`add_guild`方法，你可以添加伺服器的資訊，包括伺服器ID、未授權角色ID和已授權角色ID。
+使用`add_guild`方法，你可以添加未認證/已認證身分組的設定資料，資料為伺服器ID、未授權身分組ID和已授權身分組ID。
 
 ```python
 response = client.add_guild(1234567890, "unauth_role_id", "auth_role_id")
@@ -51,7 +52,8 @@ print(response)
 
 ### 4. 將使用者添加到伺服器
 
-使用`add_user_to_server`方法，你可以根據指定的user_id將使用者添加到伺服器中。
+使用`add_user_to_server`方法，你可以根據指定的user_id將使用者添加到ZeitFrei Discord主伺服器中。
+該使用者必須存在於至少一個擁有Qlipoth認證機器人的伺服器中。
 
 ```python
 response = client.add_user_to_server(1234567890)
