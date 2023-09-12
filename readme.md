@@ -7,7 +7,7 @@
 ## 安裝
 
 ```
-pip install git+https://github.com/ZeltFrei/EvanlauOauthServer.git@library
+pip install git+https://github.com/ZeltFrei/EvanlauOauthServer.git
 ```
 
 ## 初始化
