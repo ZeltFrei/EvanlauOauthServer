@@ -1,8 +1,12 @@
 import requests
 
 class DiscordOAuthClient:
-    def __init__(self, api_key:str):
-        self.api_base_url = "http://localhost:2094"
+    def __init__(self, api_key:str, api_base_url:str = "http://localhost:2094"):
+        """
+        載入Zeitfrei Discord OAuth函式庫
+        伺服器預設位置為「http://localhost:2094」
+        """
+        self.api_base_url = api_base_url
         self.api_key = api_key
         self.headers = {
             "X-API-KEY": self.api_key
@@ -10,19 +14,36 @@ class DiscordOAuthClient:
 
     def get_user(self, user_id:int):
         """
+        藉由使用ID查詢使用者已授權之資料
+
         使用方法:
-        user = client.get_user("1234567890")
+        user = client.get_user(1234567890)
         print(user)
         """
         response = requests.get(f"{self.api_base_url}/user/{user_id}", headers=self.headers)
         if response.status_code != 200:
             return None
         return response.json()
+    
+    def get_guild_auth_role_data(self, guild_id:int):
+        """
+        獲取伺服器登記之未授權/已授權身分組資料
+
+        使用方法:
+        guild_data = client.get_guild_auth_role_data("guild_id")
+        """
+        response = requests.get(f"{self.api_base_url}/get_guild_auth_role_data/{guild_id}", headers=self.headers)
+        if response.status_code != 200 or len(dict(response.json())) == 0:
+            return None
+        return response.json()
 
     def delete_user(self, user_id:int):
         """
+        使用`delete_user`方法，你可以根據指定的使用者ID刪除使用者。
+        這僅會將使用者從所有擁有此系統的伺服器中踢除該成員，使用者可以重新進行授權。
+
         使用方法:
-        response = client.delete_user("1234567890")
+        response = client.delete_user(1234567890)
         print(response)
         """
         response = requests.delete(f"{self.api_base_url}/delete_user/{user_id}", headers=self.headers)
@@ -32,8 +53,10 @@ class DiscordOAuthClient:
 
     def add_guild(self, guild_id:int, unauth_role:int, auth_role:int):
         """
+        添加未認證/已認證身分組的設定資料，資料為伺服器ID、未授權身分組ID和已授權身分組ID。
+        
         使用方法:
-        response = client.add_guild("1234567890", "unauth_role_id", "auth_role_id")
+        response = client.add_guild(1234567890, "unauth_role_id", "auth_role_id")
         print(response)
         """
         data = {
@@ -48,8 +71,11 @@ class DiscordOAuthClient:
 
     def add_user_to_server(self, user_id:int):
         """
+        根據指定的user_id將使用者添加到ZeitFrei Discord主伺服器
+        該使用者必須存在於至少一個擁有Qlipoth認證機器人的伺服器中
+
         使用方法:
-        response = client.add_user_to_server("1234567890")
+        response = client.add_user_to_server(1234567890)
         print(response)
         """
         response = requests.post(f"{self.api_base_url}/add_user_to_server/{user_id}", headers=self.headers)

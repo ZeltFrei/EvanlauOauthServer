@@ -15,11 +15,13 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 REDIRECT_URI = 'https://oauth.zeitfrei.tw/callback'
 
 @app.route('/')
+#將預設網址重新導向到discord授權頁面
 def index():
     return redirect(
         f"https://discord.com/api/oauth2/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&&response_type=code&scope=guilds%20email%20guilds.join%20identify")
 
 @app.route('/callback')
+#接收discord API返回資料
 def callback():
     code = request.args.get('code')
     data = {
@@ -63,6 +65,7 @@ def close():
     '''
 
 @app.route('/user/<user_id>')
+#使用者資料查詢
 def get_user(user_id):
     if not check_api_key(request):
         return jsonify({"error": "Invalid API key"}), 403
@@ -82,7 +85,9 @@ def get_user(user_id):
         else:
             return make_response(jsonify({"error": "User not found"}), 404)
 
-@app.route('/delete_user/<user_id>', methods=['DELETE'])
+@app.route('/delete_user/<user_id>', methods=['DELETE']) 
+#根據指定的使用者ID刪除使用者
+#這僅會將使用者從所有擁有此系統的伺服器中踢除該成員，使用者可以重新進行授權
 def delete_user(user_id):
     if not check_api_key(request):
         return jsonify({"error": "Invalid API key"}), 403
@@ -100,7 +105,8 @@ def delete_user(user_id):
     current_app.logger.info(f"User {user_id} deleted successfully.")
     return jsonify({"message": f"User {user_id} deleted successfully"})
 
-@app.route('/add_guild', methods=['POST'])
+@app.route('/add_guild', methods=['POST']) 
+#新增認證伺服器未驗證/已驗證設定資料
 def add_guild():
     if not check_api_key(request):
         return jsonify({"error": "Invalid API key"}), 403
@@ -108,6 +114,11 @@ def add_guild():
     data = request.json
     with sqlite3.connect("users.db") as conn:
         cursor = conn.cursor()
+
+        #檢查是否有重複資料
+        if cursor.execute(f"SELECT * FROM guild WHERE guild_id = ? AND unauth_role_id = ? AND auth_role_id = ?",(data['guild_id'],data['unauth_role'],data['auth_role'],)).fetchone() is not None:
+            return jsonify({"ERROR":"Role data already exists."}),403
+
         cursor.execute("INSERT OR REPLACE INTO guild (guild_id, unauth_role_id, auth_role_id) VALUES (?, ?, ?)",
                        (data['guild_id'], data['unauth_role'], data['auth_role']))
         conn.commit()
@@ -115,7 +126,8 @@ def add_guild():
     current_app.logger.info(f"Guild {data['guild_id']} added successfully.")
     return jsonify({"message": "Guild data added successfully!"})
 
-@app.route('/add_user_to_server/<user_id>', methods=['POST'])
+@app.route('/add_user_to_server/<user_id>', methods=['POST']) 
+#以使用者ID新增使用者到Zeitfrei主伺服器中
 def call_add_user(user_id):
     if not check_api_key(request):
         return jsonify({"ERROR": "Invalid API key"}), 403
@@ -123,11 +135,30 @@ def call_add_user(user_id):
     current_app.logger.info(f"User {user_id} join successfully.")
     return jsonify({"status": response.text}), response.status_code
 
-def check_api_key(request):
+@app.route('/get_guild_auth_role_data/<guild_id>')
+#獲取伺服器登記之未授權/已授權身分組資料
+def get_guild_auth_role_data(guild_id):
+    if not check_api_key(request):
+        return jsonify({"ERROR": "Invalid API key"}), 403
+    
+    with sqlite3.connect("users.db") as conn:
+        cursor = conn.cursor()
+        data_list = cursor.execute("SELECT * FROM guild WHERE guild_id = ?",(guild_id,)).fetchall()
+        output = {}
+        for data in enumerate(data_list,0):
+            temp_list = {
+                "guild_id": data[1][0],
+                "unauth_role_id": data[1][1],
+                "auth_role_id": data[1][2]
+            }
+            output.update({data[0]:temp_list})
+        return jsonify(output)
+
+def check_api_key(request): #檢查API_KEY是否符合
     provided_key = request.headers.get('X-API-KEY')
     return hmac.compare_digest(provided_key, API_KEY)
 
-def save_user_to_db(user, token_info):
+def save_user_to_db(user, token_info): #儲存使用者授權資料
     with sqlite3.connect("users.db") as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -150,14 +181,14 @@ def save_user_to_db(user, token_info):
         )
         conn.commit()
 
-def refresh_token_if_expired(user_id):
+def refresh_token_if_expired(user_id): #將過期的access_token刷新
     with sqlite3.connect("users.db") as conn:
         cursor = conn.cursor()
         user_data = cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         
         expires_at = user_data[5]
         # 檢查 access_token 是否已過期
-        if datetime.datetime.now() >= expires_at:
+        if datetime.datetime.now() >= datetime.datetime.strptime(expires_at,"%Y-%m-%d %H:%M:%S.%f"):
             data = {
                 'client_id': CLIENT_ID,
                 'client_secret': CLIENT_SECRET,
@@ -181,7 +212,7 @@ def refresh_token_if_expired(user_id):
             )
             conn.commit()
 
-def add_user_to_server(user_id:int):
+def add_user_to_server(user_id:int): #根據使用者ID將使用者加入伺服器中
     refresh_token_if_expired(user_id)
     with sqlite3.connect("users.db") as conn:
         cursor = conn.cursor()
