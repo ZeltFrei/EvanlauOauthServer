@@ -21,7 +21,7 @@ pip install -U git+https://github.com/ZeltFrei/EvanlauOauthServer.git
 首先，你需要創建一個`DiscordOAuthClient`的實例，並提供你的API金鑰。
 
 ```python
-from oauth import DiscordOAuthClient
+from ZeitfreiOauth import DiscordOAuthClient
 
 client = DiscordOAuthClient(api_key="YOUR_API_KEY_HERE")
 ```
