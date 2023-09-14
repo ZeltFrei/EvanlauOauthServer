@@ -1,7 +1,7 @@
 import requests
 
 class DiscordOAuthClient:
-    def __init__(self, api_key: str, api_base_url: str = "http://localhost:2094", client_id: int = 1020705629360365678):
+    def __init__(self, api_key: str, api_base_url: str = "http://localhost:2094", client_id: int = 1092062648784404550):
         """
         載入Zeitfrei Discord OAuth函式庫
         伺服器預設位置為「http://localhost:2094」
@@ -41,8 +41,10 @@ class DiscordOAuthClient:
 
     def delete_user(self, user_id:int) -> dict:
         """
-        使用`delete_user`方法，你可以根據指定的使用者ID刪除使用者。
-        這僅會將使用者從所有擁有此系統的伺服器中踢除該成員，使用者可以重新進行授權。
+        使用`delete_user`方法，你可以根據指定的使用者ID刪除使用者
+        這僅會將使用者從所有擁有此系統的伺服器中踢除該成員
+        並將已授權的身分組撤回
+        注意:使用者可以重新進行授權
 
         使用方法:
         response = client.delete_user(1234567890)

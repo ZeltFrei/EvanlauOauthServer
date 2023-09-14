@@ -13,6 +13,7 @@ CLIENT_SECRET = os.getenv('CLIENT_SECRET')
 API_KEY = os.getenv("API_KEY")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 REDIRECT_URI = 'https://oauth.zeitfrei.tw/callback'
+DATABASE = "users.db"
 
 @app.route('/')
 #將預設網址重新導向到discord授權頁面
@@ -70,7 +71,7 @@ def get_user(user_id):
     if not check_api_key(request):
         return jsonify({"error": "Invalid API key"}), 403
 
-    with sqlite3.connect("users.db") as conn:
+    with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         user = cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if user:
@@ -87,19 +88,27 @@ def get_user(user_id):
 
 @app.route('/delete_user/<user_id>', methods=['DELETE']) 
 #根據指定的使用者ID刪除使用者
-#這僅會將使用者從所有擁有此系統的伺服器中踢除該成員，使用者可以重新進行授權
+#這僅會將使用者從所有擁有此系統的伺服器中踢除該成員
+#並將已授權的身分組撤回
+#使用者可以重新進行授權
 def delete_user(user_id):
     if not check_api_key(request):
         return jsonify({"error": "Invalid API key"}), 403
 
-    with sqlite3.connect("users.db") as conn:
+    with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         guilds = cursor.execute("SELECT * FROM guild").fetchall()
+        headers = {
+                'Authorization': f"Bot {BOT_TOKEN}"
+            }
         for guild in guilds:
             guild_id = guild[0]
-            response = requests.delete(f"https://discord.com/api/guilds/{guild_id}/members/{user_id}", headers={
-                'Authorization': f"Bot {BOT_TOKEN}"
-            })
+            unauth_role_id = guild[1]
+            auth_role_id = guild[2]
+            requests.delete(f"https://discord.com/api/guilds/{guild_id}/members/{user_id}", headers=headers)
+            requests.delete(f"https://discord.com/api/guilds/{guild_id}/members/{user_id}/roles/{auth_role_id}", headers=headers)
+            if guild_id != unauth_role_id: #判斷是否為everyone身分組
+                requests.put(f"https://discord.com/api/guilds/{guild_id}/members/{user_id}/roles/{unauth_role_id}", headers=headers)
         cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
     current_app.logger.info(f"User {user_id} deleted successfully.")
@@ -112,7 +121,7 @@ def add_guild():
         return jsonify({"error": "Invalid API key"}), 403
     
     data = request.json
-    with sqlite3.connect("users.db") as conn:
+    with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
 
         #檢查是否有重複資料
@@ -141,7 +150,7 @@ def get_guild_auth_role_data(guild_id):
     if not check_api_key(request):
         return jsonify({"ERROR": "Invalid API key"}), 403
     
-    with sqlite3.connect("users.db") as conn:
+    with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         data_list = cursor.execute("SELECT * FROM guild WHERE guild_id = ?",(guild_id,)).fetchall()
         output = {}
@@ -159,7 +168,7 @@ def check_api_key(request): #檢查API_KEY是否符合
     return hmac.compare_digest(provided_key, API_KEY)
 
 def save_user_to_db(user, token_info): #儲存使用者授權資料
-    with sqlite3.connect("users.db") as conn:
+    with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -182,7 +191,7 @@ def save_user_to_db(user, token_info): #儲存使用者授權資料
         conn.commit()
 
 def refresh_token_if_expired(user_id): #將過期的access_token刷新
-    with sqlite3.connect("users.db") as conn:
+    with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         user_data = cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         
@@ -214,7 +223,7 @@ def refresh_token_if_expired(user_id): #將過期的access_token刷新
 
 def add_user_to_server(user_id:int): #根據使用者ID將使用者加入伺服器中
     refresh_token_if_expired(user_id)
-    with sqlite3.connect("users.db") as conn:
+    with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         user_data = cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         guild_data = cursor.execute("SELECT * FROM guild").fetchall()
@@ -228,15 +237,18 @@ def add_user_to_server(user_id:int): #根據使用者ID將使用者加入伺服�
         'access_token': user_data[3]
     }
 
-    #response = requests.put(f"https://discord.com/api/guilds/969732954572075008/members/{user_id}", headers=headers, json=data) 正式程式
-    response = requests.put(f"https://discord.com/api/guilds/1090311734050426960/members/{user_id}", headers=headers, json=data) #測試用
+    response = requests.put(f"https://discord.com/api/guilds/969732954572075008/members/{user_id}", headers=headers, json=data) #正式程式
+    #response = requests.put(f"https://discord.com/api/guilds/1090311734050426960/members/{user_id}", headers=headers, json=data) #測試用
     
     if response.status_code == 201:
         print(f"{user_data[1]}已加入伺服器")
     for data in guild_data:
         guild_id = data[0]
+        unauth_role_id = data[1]
         auth_role_id = data[2]
         requests.put(f"https://discord.com/api/guilds/{guild_id}/members/{user_id}/roles/{auth_role_id}", headers=headers)
+        if guild_id != unauth_role_id: #判斷是否為everyone身分組
+            requests.delete(f"https://discord.com/api/guilds/{guild_id}/members/{user_id}/roles/{unauth_role_id}", headers=headers)
     return response
 
 if __name__ == "__main__":
