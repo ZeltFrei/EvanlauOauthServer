@@ -31,6 +31,11 @@ client = DiscordOAuthClient(api_key="YOUR_API_KEY_HERE")
 client = DiscordOAuthClient(api_key="YOUR_API_KEY_HERE",api_base_url="YOUR_API_BASE_URL")
 ```
 
+若需要以其他機器人帳號進行驗證，請在創建實例時定義`client_id`以修改預設驗證網址
+```python
+client = DiscordOAuthClient(api_key="YOUR_API_KEY_HERE",client_id="YOUR_CLIENT_ID_HERE")
+```
+
 ## 方法
 
 ### 1. 取得使用者
