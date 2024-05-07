@@ -70,17 +70,17 @@ class AsyncDiscordOAuthClient:
 
         return Guild.from_dict(await response.json())
 
-    async def delete_user(self, user_id: int) -> bool:
+    async def delete_user(self, user_id: int) -> ResultResponse:
         """
         Delete a user by user ID.
         :param user_id: The user ID to delete the user for.
-        :return: always True
+        :return: The response from the API.
         """
         response = await self.session.delete(f"/delete_user/{user_id}")
 
         response.raise_for_status()
 
-        return True
+        return ResultResponse.from_dict(await response.json())
 
     async def add_guild(self, guild: Guild) -> ResultResponse:
         """
