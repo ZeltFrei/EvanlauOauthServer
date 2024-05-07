@@ -6,6 +6,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         'requests',
+        'aiohttp'
     ],
     author='Evanlau',
     author_email='sl30608@gmail.com',
