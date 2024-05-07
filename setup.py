@@ -2,10 +2,11 @@ from setuptools import setup, find_packages
 
 setup(
     name='ZeitfreiOauth',
-    version='0.0.4',
+    version='0.0.5',
     packages=find_packages(),
     install_requires=[
         'requests',
+        'aiohttp'
     ],
     author='Evanlau',
     author_email='sl30608@gmail.com',
