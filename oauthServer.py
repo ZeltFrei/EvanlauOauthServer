@@ -169,7 +169,7 @@ async def web_auth_error(request):
 
 async def get_user(request):
     user_id = request.match_info['user_id']
-    ensure = bool(request.query.get('ensure', 'false') == 'true')
+    ensure = bool(request.query.get('ensure', 'False') == 'True')
     if not check_api_key(request):
         return web.json_response({"error": "Invalid API key"}, status=403)
     
@@ -191,6 +191,7 @@ async def get_user(request):
                 else:
                     await refresh_token_if_expired(user_id)
             except Exception as e:
+                await delete_user(user_id)
                 return web.json_response({"error": e}, status=403)
 
             return web.json_response({
@@ -221,7 +222,10 @@ async def delete_user(request):
     user_id = request.match_info['user_id']
     if not check_api_key(request):
         return web.json_response({"error": "Invalid API key"}, status=403)
+    await execute_user_deletion(user_id)
+    return web.json_response({"message": f"User {user_id} deleted successfully"})
 
+async def execute_user_deletion(user_id):
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         guilds = cursor.execute("SELECT * FROM guild").fetchall()
@@ -239,8 +243,6 @@ async def delete_user(request):
                     await session.put(f"https://discord.com/api/guilds/{guild_id}/members/{user_id}/roles/{unauth_role_id}", headers=headers)
         cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
-
-    return web.json_response({"message": f"User {user_id} deleted successfully"})
 
 async def add_guild(request):
 #新增認證伺服器未驗證/已驗證設定資料
