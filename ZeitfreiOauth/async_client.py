@@ -21,13 +21,14 @@ class AsyncDiscordOAuthClient:
             }
         )
 
-    async def get_user(self, user_id: int) -> User:
+    async def get_user(self, user_id: int, ensure: bool = False) -> User:
         """
         Get a authorized user by user ID.
         :param user_id: The user ID to get the user for.
+        :param ensure: (Optional) Querying Discord API for real-time authorization.
         :return: The User object.
         """
-        response = await self.session.get(f"/user/{user_id}")
+        response = await self.session.get(f"/user/{user_id}?ensure={ensure}")
 
         response.raise_for_status()
 

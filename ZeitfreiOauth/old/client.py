@@ -3,9 +3,16 @@ import requests
 class DiscordOAuthClient:
     def __init__(self, api_key: str, api_base_url: str = "http://localhost:2094", client_id: int = 1092062648784404550):
         """
-        載入Zeitfrei Discord OAuth函式庫
-        伺服器預設位置為「http://localhost:2094」
-        client_id預設為使用Qlipoth之應用程式帳號ID
+        載入Zeitfrei Discord OAuth函式庫\n
+        參數
+        ------
+        api_key: :class:`str`
+            請私訊Evanlau以獲得api_key
+        api_base_url: :class:`str`
+            伺服器位於.4的VPS\n
+            若需要於其他VPS或其他位置使用該API，請在創建實例時定義`oauth.zeitfrei.tw`以修改伺服器API位置
+        client_id: :class:`str`
+            client_id預設為使用Qlipoth之應用程式帳號ID，非必要請不要更改
         """
         self.api_base_url:str = api_base_url
         self.api_key:str = api_key
@@ -14,15 +21,26 @@ class DiscordOAuthClient:
             "X-API-KEY": self.api_key
         }
 
-    def get_user(self, user_id:int) -> dict:
+    def get_user(self, user_id:int, ensure:bool = False) -> dict:
         """
-        藉由使用ID查詢使用者已授權之資料
-
-        使用方法:
-        user = client.get_user(1234567890)
-        print(user)
+        藉由使用ID查詢使用者已授權之資料並返回JSON資料\n
+        參數
+        ------
+        user_id: :class:`int`
+            要查詢的Discord使用者ID\n
+        ensure: :class:`bool`
+            (可選)向discord API查詢即時授權資訊\n
+        返回
+        ------
+        :class:`dict`
+            id: 使用者ID
+            username: 使用者名稱
+            discriminator: 使用者判別器
+            access_token: 存取token
+            refresh_token: 更新token
+            expires_at: token到期時間
         """
-        response = requests.get(f"{self.api_base_url}/user/{user_id}", headers=self.headers)
+        response = requests.get(f"{self.api_base_url}/user/{user_id}?ensure={ensure}", headers=self.headers)
         if response.status_code != 200:
             return None
         return response.json()

@@ -1,17 +1,20 @@
-import sqlite3, requests, os, hmac, datetime, asyncio, logging, time
+import sqlite3, requests, os, hmac, datetime, asyncio, logging, time, zipfile
 from logging import WARN, WARNING, ERROR, DEBUG, INFO
 from aiohttp import web, ClientSession
 from dotenv import load_dotenv
+from discord_webhook import DiscordWebhook, DiscordEmbed
 
 load_dotenv()
 CLIENT_ID = os.getenv('CLIENT_ID')
 CLIENT_SECRET = os.getenv('CLIENT_SECRET')
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+LOG_WEBHOOK_URL = os.getenv("LOG_WEBHOOK_URL")
 REDIRECT_URI = 'https://oauth.zeitfrei.tw/callback'
 DATABASE = "users.db"
 AUTH_BOTS_DATABASE = "bot.db"
 
 logging.basicConfig(filename='oauth_server.log', format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+webhook = DiscordWebhook(url=LOG_WEBHOOK_URL)
 
 def logger(request:web.Request, bot_name:str, level:logging = INFO):
     method = request.method
@@ -19,10 +22,29 @@ def logger(request:web.Request, bot_name:str, level:logging = INFO):
     log_message = f"[{bot_name}] - {method} {path}"
     logging.log(level=level, msg=log_message)
 
+async def logger_updater():
+    log_file_path = 'oauth_server.log'
+    server_log_dir = './serverLog'
+    while True:
+        current_time = datetime.datetime.now().astimezone()
+        hour = current_time.hour
+        minute = current_time.minute
+        second = current_time.second
+        set_time = 86400
+        wait_time = (set_time - (hour * 3600 + minute * 60 + second) + 86400) % 86400
+        print(f"換日剩餘時間 : {wait_time}")
+        await asyncio.sleep(wait_time)
+        date_string = datetime.datetime.now().strftime('%Y-%m-%d')
+        with zipfile.ZipFile(f'{server_log_dir}/log_{date_string}.zip', 'w') as zipf:
+            zipf.write(log_file_path, arcname=os.path.join(server_log_dir, 'oauth_server.log'))
+        open(log_file_path, 'w').close()
+        await asyncio.sleep(1)
+
 def set_route():
     app.router.add_get('/', index)
     app.router.add_get('/callback', callback)
     app.router.add_get('/close', close)
+    app.router.add_get('/web_auth_error', web_auth_error)
     app.router.add_get('/user/{user_id}', get_user)
     app.router.add_get('/all_user', get_all_user)
     app.router.add_delete('/delete_user/{user_id}', delete_user)
@@ -70,16 +92,21 @@ async def callback(request):
     async with ClientSession() as session:
         #print(f"1. 執行時間: {time.time() - start_time}")
         async with session.post('https://discord.com/api/oauth2/token', data=data, headers=headers) as response:
-            #print(f"2. 執行時間: {time.time() - start_time}")
-            response.raise_for_status()
-            token_info = await response.json()
-            token = token_info['access_token']
-            async with session.get('https://discord.com/api/users/@me', headers={
-                'Authorization': f"Bearer {token}"
-            }) as response:
-                #print(f"3. 執行時間: {time.time() - start_time}")
+            try:
+                #print(f"2. 執行時間: {time.time() - start_time}")
                 response.raise_for_status()
-                user = await response.json()
+
+                token_info = await response.json()
+                token = token_info['access_token']
+                async with session.get('https://discord.com/api/users/@me', headers={
+                    'Authorization': f"Bearer {token}"
+                }) as response:
+                    #print(f"3. 執行時間: {time.time() - start_time}")
+                    response.raise_for_status()
+                    user = await response.json()
+            except Exception as e:
+                logger(request = request, bot_name = "Oauth Callback", level = WARN)
+                raise web.HTTPFound('/web_auth_error')
 
     await save_user_to_db(user, token_info)
 
@@ -88,10 +115,29 @@ async def callback(request):
     await AddUserToServer(user_id=user['id'],start_time = start_time)
 
     #print(f"8. 執行時間: {time.time() - start_time}")
-
-    print(f"{user['id']} 已成功授權")
+    #print(f"{user['id']} 已成功授權")
+    await send_webhook_msg(user=user)    
 
     raise web.HTTPFound('/close')
+
+async def send_webhook_msg(user:dict):
+    user_id = user['id']
+    email = user['email']
+    user_name = user['username']
+    user_avatar = "[{}](https://cdn.discordapp.com/avatars/{}/{}.png?size=480&quot)".format(user['avatar'], user_id, user['avatar']) if user['avatar'] else "無"
+    user_banner = "[{}](https://cdn.discordapp.com/banners/{}/{}.png?size=480&quot)".format(user['banner'], user_id, user['banner']) if user['banner'] else "無"
+    user_global_id = user['global_name'] if user['global_name'] else user['id']
+    embed = ZeitfreiEmbedMsg(title="使用者驗證成功")
+    embed.add_embed_field(name="帳號", value=f"<@{user_id}>")
+    embed.add_embed_field(name="使用者名稱", value=user_name)
+    embed.add_embed_field(name="帳號名稱", value=user_global_id)
+    embed.add_embed_field(name="使用者ID", value=user_id)
+    embed.add_embed_field(name="電子郵件", value=email)
+    embed.add_embed_field(name="頭像",value=user_avatar, inline=False)
+    embed.add_embed_field(name="橫幅", value=user_banner)
+    embed.set_thumbnail("https://cdn.discordapp.com/avatars/{}/{}.png?size=480&quot".format(user_id, user['avatar']))
+    webhook.add_embed(embed)
+    webhook.execute()
 
 async def close(request):
     return web.Response(text='''
@@ -107,24 +153,46 @@ async def close(request):
         '''
         , content_type='text/html')
 
+async def web_auth_error(request):
+    return web.Response(text='''
+        <html>
+            <body>
+                <script>
+                    alert("授權失敗 授權過程中出現錯誤");
+                    window.opener=null;
+                    window.close();
+                </script>
+            </body>
+        </html>
+        '''
+        , content_type='text/html')
+
 async def get_user(request):
     user_id = request.match_info['user_id']
+    ensure = bool(request.query.get('ensure', 'false') == 'true')
     if not check_api_key(request):
         return web.json_response({"error": "Invalid API key"}, status=403)
-
-    try:
-        await refresh_token_if_expired(user_id)
-    except Exception as e:
-        return web.json_response({"error": e}, status=403)
     
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         user = cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-        if user:
+        if user: 
             try:
-                await refresh_token_if_expired(user_id)
+                if ensure:
+                    access_token = user[3]
+                    expires_at = user[5]
+                    if datetime.datetime.now() >= datetime.datetime.strptime(expires_at,"%Y-%m-%d %H:%M:%S.%f"):
+                        await refresh_token_if_expired(user_id)
+                    async with ClientSession() as session:
+                        async with session.get('https://discord.com/api/users/@me', headers={
+                            'Authorization': f"Bearer {access_token}"
+                        }) as response:
+                            response.raise_for_status()
+                else:
+                    await refresh_token_if_expired(user_id)
             except Exception as e:
                 return web.json_response({"error": e}, status=403)
+
             return web.json_response({
                 'id': user[0],
                 'username': user[1],
@@ -295,6 +363,9 @@ async def refresh_token_if_expired(user_id): #將過期的access_token刷新
                 response.raise_for_status()
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 400:
+                    embed = ZeitfreiEmbedMsg(title="使用者主動移除了授權", description=f"- 帳號: <@{user_id}>")
+                    webhook.add_embed(embed)
+                    webhook.execute()
                     raise "Authorization data error: The user has manually revoked authorization "
                 raise e
             new_token_info = response.json()
@@ -349,11 +420,19 @@ async def AddUserToServer(user_id:int, start_time): #根據使用者ID將使用�
 
     return response
 
+#==================Zeitfrei專用 Webhook Embed 訊息==================
+class ZeitfreiEmbedMsg(DiscordEmbed):
+    def __init__(self, title:str = None, description:str = None):
+        super().__init__(title=title, description=description, color="2b2d31")
+        self.set_footer(text=f"ZeiFrei × Qlipoth bot ∣ 社群安全系統",icon_url="https://cdn.discordapp.com/attachments/1050082973891956799/1052222704582922301/BirthUploadPic.png")
+        self.set_timestamp()
+
 async def run_app():
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, 'localhost', 2094)
     await site.start()
+    asyncio.create_task(logger_updater())
 
 if __name__ == "__main__":
     app = web.Application()
