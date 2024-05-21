@@ -192,7 +192,7 @@ async def get_user(request):
                     await refresh_token_if_expired(user_id)
             except Exception as e:
                 await delete_user(user_id)
-                return web.json_response({"error": e}, status=403)
+                return web.json_response({"message": "Found user authorization data, but the user has manually revoked authorization."}, status=403)
 
             return web.json_response({
                 'id': user[0],
@@ -203,7 +203,7 @@ async def get_user(request):
                 'expires_at': user[5]
             })
         else:
-            return web.json_response({"error": "User not found"}, status=404)
+            return web.json_response({"error": "User not found"}, status=410)
 
 async def get_all_user(request):
     if not check_api_key(request):

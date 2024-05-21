@@ -1,91 +1,138 @@
-# ZeitFrei Discord OAuth API 函式庫使用指南
+## Zeitfrei OAuth授權 API 說明文件
 
-## 概覽
+本文件描述 Zeitfrei 用於機器人驗證的 REST API 使用方法，目前由 Evanlau 開發與維護。
 
-這是一個用於與ZeitFrei Discord OAuth授權API互動的Python函式庫。
+### 連線方法
+API 網址為 oauth.zeitfrei.tw ，向此端點發送請求以開始使用 API 。
 
-## 安裝
+### 安全金鑰
+
+- 所有金鑰都是唯一的，每個在 Zeitfrei 旗下的機器人都需要申請金鑰。
+- 機器人開發者使用了本 API 後，伺服器會留下 log 紀錄以利追查使用紀錄與陌生使用者。
+- 所有 API 請求都需要在請求標頭中包含 `X-API-KEY` ，其值為 API 金鑰。
 
 ```
-pip install git+https://github.com/ZeltFrei/EvanlauOauthServer.git
+{
+    X-API-KEY: YOUR_API_KEY
+}
 ```
 
-## 更新
+### API 端點
 
-```
-pip install -U git+https://github.com/ZeltFrei/EvanlauOauthServer.git
-```
 
-## 初始化
+#### `/` (GET)
 
-首先，你需要創建一個`DiscordOAuthClient`的實例，並提供你的API金鑰。
+- **描述**: 將使用者重定向至 Discord OAuth2 授權頁面。
+- **參數**: 無
+- **連結**: [https://oauth.zeitfrei.tw](https://oauth.zeitfrei.tw)
+- **用途**:
+    - 萬用的網址，會重新導向到 `Qlipoth` 的 OAuth 授權頁面
+    - 也可以用以下連結在 Discord 內直接完成授權：
+      [Discord OAuth2 授權連結](https://discord.com/api/oauth2/authorize?client_id=1092062648784404550&redirect_uri=https://oauth.zeitfrei.tw/callback&&response_type=code&scope=guilds%20email%20guilds.join%20identify)
 
-```python
-from ZeitfreiOauth import DiscordOAuthClient
 
-client = DiscordOAuthClient(api_key="YOUR_API_KEY_HERE")
-```
+#### `/user/{user_id}` (GET)
 
-若需要於其他VPS或其他位置使用該API，請在創建實例時定義`api_base_url`以修改伺服器API位置
-```python
-client = DiscordOAuthClient(api_key="YOUR_API_KEY_HERE",api_base_url="YOUR_API_BASE_URL")
-```
+- **描述**: 獲取指定使用者的資料。
+- **參數**:
+    - `user_id`: Discord 使用者 ID
+    - `ensure` (選填, 預設為 False): 若設為 True，則會檢查 access token 是否過期，若過期則會刷新 access token。
+- **回應**:
+    - 200 OK：成功找到使用者資料，回傳 JSON 格式的使用者資料：
+        ```json
+        {
+            'id': '使用者 ID',
+            'username': '使用者名稱',
+            'discriminator': '使用者標籤',
+            'access_token': '存取權杖',
+            'refresh_token': '刷新權杖',
+            'expires_at': '權杖到期時間'
+        }
+        ```
+    - 403 Forbidden: 
+        - API 金鑰無效。
+        - 發現使用者授權資料，但使用者已手動撤銷授權：此時會回傳訊息 `"message": "Found user authorization data, but the user has manually revoked authorization."`
+    - 410 Gone: 使用者不存在，可能已被刪除。此時會回傳訊息 `"error": "User not found"`
 
-若需要以其他機器人帳號進行驗證，請在創建實例時定義`client_id`以修改預設驗證網址
-```python
-client = DiscordOAuthClient(api_key="YOUR_API_KEY_HERE",client_id="YOUR_CLIENT_ID_HERE")
-```
+#### `/all_user` (GET)
 
-## 方法
+- **描述**: 獲取所有已授權使用者的資料。
+- **參數**: 無
+- **回應**:
+    - 200 OK JSON 格式的所有使用者資料列表
+    - 403 Forbidden API 金鑰無效
 
-### 1. 取得使用者
+#### `/delete_user/{user_id}` (DELETE)
 
-使用`get_user`方法，你可以根據指定的使用者ID獲得使用者資訊，若尋找失敗會返回None。
+- **描述**: 刪除指定使用者的資料，並將使用者從所有已設定的伺服器中移除。
+- **參數**:
+    - `user_id`: Discord 使用者 ID
+- **回應**:
+    - 200 OK JSON 格式的訊息，表示使用者已成功刪除
+    - 403 Forbidden API 金鑰無效
 
-```python
-user = client.get_user(1234567890)
-print(user)
-```
+#### `/add_guild` (POST)
 
-### 2. 取得伺服器登記之身分組資料
+- **描述**: 新增伺服器的未驗證/已驗證身分組設定資料。
+- **參數**:
+    - JSON 格式的請求主體，包含以下欄位：
+        ```json
+        {
+            'guild_id': '伺服器 ID',
+            'unauth_role': '未驗證身分組 ID',
+            'auth_role': '已驗證身分組 ID',
+            'reauth_day': '重新驗證天數'
+        }
+        ```
+- **回應**:
+    - 200 OK JSON 格式的訊息，表示伺服器資料已成功新增
+    - 403 Forbidden API 金鑰無效或身分組資料已存在
 
-使用`get_guild_auth_role_data`方法，你可以根據指定的伺服器ID獲得未授權/已授權的身分組ID，若尋找失敗會返回None。
+#### `/delete_guild_data` (DELETE)
 
-```python
-guild_data = client.get_guild_auth_role_data(1234567890)
-print(guild_data)
-```
+- **描述**: 刪除伺服器的未驗證/已驗證身分組設定資料。
+- **參數**:
+    - JSON 格式的請求主體，包含以下欄位：
+        ```json
+        {
+            'guild_id': '伺服器 ID',
+            'unauth_role': '未驗證身分組 ID',
+            'auth_role': '已驗證身分組 ID'
+        }
+        ```
+- **回應**:
+    - 200 OK JSON 格式的訊息，表示伺服器資料已成功刪除
+    - 403 Forbidden API 金鑰無效或身分組資料不存在
 
-### 3. 刪除使用者
+#### `/add_user_to_server/{user_id}` (POST)
 
-使用`delete_user`方法，你可以根據指定的使用者ID刪除使用者。這僅會將使用者從所有擁有此系統的伺服器中踢除該成員，並將已授權的身分組撤回。
+- **描述**: 將指定使用者加入所有已設定的伺服器，並設定對應的身分組。
+- **參數**:
+    - `user_id`: Discord 使用者 ID
+- **回應**:
+    - 200 OK JSON 格式的訊息，表示使用者已成功加入伺服器
+    - 403 Forbidden API 金鑰無效
 
-**注意:使用者可以重新進行授權**
+#### `/get_guild_auth_role_data/{guild_id}` (GET)
 
-```python
-response = client.delete_user(1234567890)
-print(response)
-```
+- **描述**: 獲取指定伺服器已設定的未驗證/已驗證身分組資料。
+- **參數**:
+    - `guild_id`: Discord 伺服器 ID
+- **回應**:
+    - 200 OK JSON 格式的伺服器身分組資料列表
+    - 403 Forbidden API 金鑰無效
 
-### 4. 添加伺服器認證身分組資訊
+#### `/get_auth_role_data/{role_data}` (GET)
 
-使用`add_guild`方法，你可以添加未認證/已認證身分組的設定資料，資料為伺服器ID、未授權身分組ID和已授權身分組ID。
+- **描述**: 獲取指定未驗證/已驗證身分組組合的伺服器設定資料。
+- **參數**:
+    - `role_data`: 未驗證身分組 ID 與已驗證身分組 ID，以 `+` 連接，例如 `1234567890+9876543210`
+- **回應**:
+    - 200 OK JSON 格式的伺服器設定資料
+    - 403 Forbidden API 金鑰無效
 
-```python
-response = client.add_guild(1234567890, "unauth_role_id", "auth_role_id")
-print(response)
-```
 
-### 5. 將使用者添加到伺服器
+### 錯誤代碼
 
-使用`add_user_to_server`方法，你可以根據指定的user_id將使用者添加到ZeitFrei Discord主伺服器中。
-該使用者必須存在於至少一個擁有Qlipoth認證機器人的伺服器中。
-
-```python
-response = client.add_user_to_server(1234567890)
-print(response)
-```
-
-## 注意
-
-- 這份函式庫中的API基底URL設定為`http://localhost:2094`，僅供ZeitFrei開發人員專用VPS內部使用。
+- 403 Forbidden: API 金鑰無效
+- 404 Not Found: 使用者不存在
