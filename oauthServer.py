@@ -3,7 +3,9 @@ from logging import WARN, WARNING, ERROR, DEBUG, INFO
 from aiohttp import web, ClientSession
 from dotenv import load_dotenv
 from discord_webhook import DiscordWebhook, DiscordEmbed
+from concurrent.futures import ThreadPoolExecutor
 
+executor = ThreadPoolExecutor()
 load_dotenv()
 CLIENT_ID = os.getenv('CLIENT_ID')
 CLIENT_SECRET = os.getenv('CLIENT_SECRET')
@@ -75,7 +77,6 @@ async def index(request):
     )
 
 async def callback(request):
-    start_time = time.time()
     logger(request,bot_name="Oauth Callback")
     code = request.query.get('code')
     data = {
@@ -90,10 +91,8 @@ async def callback(request):
         'Content-Type': 'application/x-www-form-urlencoded'
     }
     async with ClientSession() as session:
-        #print(f"1. 執行時間: {time.time() - start_time}")
         async with session.post('https://discord.com/api/oauth2/token', data=data, headers=headers) as response:
             try:
-                #print(f"2. 執行時間: {time.time() - start_time}")
                 response.raise_for_status()
 
                 token_info = await response.json()
@@ -101,26 +100,22 @@ async def callback(request):
                 async with session.get('https://discord.com/api/users/@me', headers={
                     'Authorization': f"Bearer {token}"
                 }) as response:
-                    #print(f"3. 執行時間: {time.time() - start_time}")
                     response.raise_for_status()
                     user = await response.json()
             except Exception as e:
                 logger(request = request, bot_name = "Oauth Callback", level = WARN)
                 raise web.HTTPFound('/web_auth_error')
-
-    await save_user_to_db(user, token_info)
-
-    #print(f"4. 執行時間: {time.time() - start_time}")
-
-    await AddUserToServer(user_id=user['id'],start_time = start_time)
-
-    #print(f"8. 執行時間: {time.time() - start_time}")
-    #print(f"{user['id']} 已成功授權")
-    await send_webhook_msg(user=user)    
-
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(executor, add_user_task, user, token_info)
     raise web.HTTPFound('/close')
 
-async def send_webhook_msg(user:dict):
+def add_user_task(user, token_info):
+    save_user_to_db(user, token_info)
+    AddUserToServer(user_id=user['id'])
+    send_webhook_msg(user=user)
+    change_user_nickname(user=user)
+
+def send_webhook_msg(user:dict):
     user_id = user['id']
     email = user['email']
     user_name = user['username']
@@ -318,7 +313,7 @@ async def get_auth_role_data(request):
         data = cursor.execute("SELECT * FROM guild WHERE unauth_role_id = ? AND auth_role_id = ?", (unauth_role_id, auth_role_id)).fetchone()
     return web.json_response(data)
 
-async def save_user_to_db(user, token_info): #儲存使用者授權資料
+def save_user_to_db(user, token_info): #儲存使用者授權資料
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -341,7 +336,7 @@ async def save_user_to_db(user, token_info): #儲存使用者授權資料
         )
         conn.commit()
 
-async def refresh_token_if_expired(user_id): #將過期的access_token刷新
+def refresh_token_if_expired(user_id): #將過期的access_token刷新
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         user_data = cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -382,13 +377,11 @@ async def refresh_token_if_expired(user_id): #將過期的access_token刷新
             )
             conn.commit()
 
-async def AddUserToServer(user_id:int, start_time): #根據使用者ID將使用者加入Zeitfrei主伺服器中
+def AddUserToServer(user_id:int): #根據使用者ID將使用者加入Zeitfrei主伺服器中
     try:
-        await refresh_token_if_expired(user_id)
+        refresh_token_if_expired(user_id)
     except Exception as e:
         return web.json_response({"error": e}, status=403)
-
-    #print(f"5. 執行時間: {time.time() - start_time}")
 
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
@@ -405,9 +398,6 @@ async def AddUserToServer(user_id:int, start_time): #根據使用者ID將使用�
     }
 
     response = requests.put(f"https://discord.com/api/guilds/308120017201922048/members/{user_id}", headers=headers, json=data)
-    
-    #print(f"6. 執行時間: {time.time() - start_time}")
-
     if response.status_code == 201:
         print(f"{user_data[1]}已加入伺服器")
     for data in guild_data:
@@ -417,10 +407,17 @@ async def AddUserToServer(user_id:int, start_time): #根據使用者ID將使用�
         requests.put(f"https://discord.com/api/guilds/{guild_id}/members/{user_id}/roles/{auth_role_id}", headers=headers)
         if guild_id != unauth_role_id: #判斷是否為everyone身分組
             requests.delete(f"https://discord.com/api/guilds/{guild_id}/members/{user_id}/roles/{unauth_role_id}", headers=headers)
-
-    #print(f"7. 執行時間: {time.time() - start_time}")
-
     return response
+
+def change_user_nickname(user):
+    headers = {
+        'Authorization': f"Bot {BOT_TOKEN}",
+        'Content-Type': 'application/json'
+    }
+    nickname_data = {
+        "nick": "｜" + user['username']
+    }
+    requests.patch(f"https://discord.com/api/guilds/308120017201922048/members/{user['id']}",headers=headers,json=nickname_data)
 
 #==================Zeitfrei專用 Webhook Embed 訊息==================
 class ZeitfreiEmbedMsg(DiscordEmbed):
