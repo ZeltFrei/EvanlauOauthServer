@@ -48,6 +48,7 @@ def set_route():
     app.router.add_get('/close', close)
     app.router.add_get('/web_auth_error', web_auth_error)
     app.router.add_get('/user/{user_id}', get_user)
+    app.router.add_get('/authing', authing)
     app.router.add_get('/all_user', get_all_user)
     app.router.add_delete('/delete_user/{user_id}', delete_user)
     app.router.add_post('/add_guild', add_guild)
@@ -77,7 +78,8 @@ async def index(request):
     )
 
 async def callback(request):
-    logger(request,bot_name="Oauth Callback")
+    #guild_id = request.match_info['guild_id']
+    logger(request, bot_name="Oauth Callback")
     code = request.query.get('code')
     data = {
         'client_id': CLIENT_ID,
@@ -128,6 +130,15 @@ def send_webhook_msg(user:dict):
     embed.add_embed_field(name="帳號名稱", value=user_global_id)
     embed.add_embed_field(name="使用者ID", value=user_id)
     embed.add_embed_field(name="電子郵件", value=email)
+
+    with sqlite3.connect(DATABASE) as conn:
+        cursor = conn.cursor()
+        user_authing_guild = cursor.execute('SELECT * FROM is_authing WHERE user_id = ?',(user_id,)).fetchone()
+        user_authing_guild_id = user_authing_guild[1] if user_authing_guild[1] != '' else None
+        user_authing_guild_name = user_authing_guild[2] if user_authing_guild[2] != '' else None
+
+    embed.add_embed_field(name="授權的伺服器", value=user_authing_guild_name)
+    embed.add_embed_field(name="授權的伺服器ID", value=user_authing_guild_id)
     embed.add_embed_field(name="頭像",value=user_avatar, inline=False)
     embed.add_embed_field(name="橫幅", value=user_banner)
     embed.set_thumbnail("https://cdn.discordapp.com/avatars/{}/{}.png?size=480&quot".format(user_id, user['avatar']))
@@ -139,9 +150,8 @@ async def close(request):
         <html>
             <body>
                 <script>
-                    alert("授權完成! 你現在可以返回Discord.");
-                    window.opener=null;
-                    window.close();
+                    alert("授權完成!");
+                    window.location.href = 'https://discord.gg/zeitfrei';
                 </script>
             </body>
         </html>
@@ -177,16 +187,16 @@ async def get_user(request):
                     access_token = user[3]
                     expires_at = user[5]
                     if datetime.datetime.now() >= datetime.datetime.strptime(expires_at,"%Y-%m-%d %H:%M:%S.%f"):
-                        await refresh_token_if_expired(user_id)
+                        refresh_token_if_expired(user_id)
                     async with ClientSession() as session:
                         async with session.get('https://discord.com/api/users/@me', headers={
                             'Authorization': f"Bearer {access_token}"
                         }) as response:
                             response.raise_for_status()
                 else:
-                    await refresh_token_if_expired(user_id)
+                    refresh_token_if_expired(user_id)
             except Exception as e:
-                await delete_user(user_id)
+                await delete_user(request)
                 return web.json_response({"message": "Found user authorization data, but the user has manually revoked authorization."}, status=403)
 
             return web.json_response({
@@ -199,6 +209,20 @@ async def get_user(request):
             })
         else:
             return web.json_response({"error": "User not found"}, status=410)
+        
+async def authing(request):
+    if not check_api_key(request):
+        return web.json_response({"error": "Invalid API key"}, status=403)
+
+    user_id = request.query.get('userid')
+    guild_id = request.query.get('guildid')
+    guild_name = request.query.get('guildname')
+
+    with sqlite3.connect(DATABASE) as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO is_authing (user_id, guild_id, guild_name) VALUES (?, ?, ?)",(user_id, guild_id, guild_name))
+        conn.commit()
+    return web.json_response(status=200)
 
 async def get_all_user(request):
     if not check_api_key(request):
@@ -247,16 +271,16 @@ async def add_guild(request):
     data = await request.json()
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
-
         if cursor.execute(f"SELECT * FROM guild WHERE guild_id = ? AND unauth_role_id = ? AND auth_role_id = ?",
                             (data['guild_id'], data['unauth_role'], data['auth_role'],)).fetchone() is not None:
-            return web.json_response({"ERROR": "Role data already exists."}, status=403)
+            cursor.execute(f"DELETE FROM guild WHERE guild_id = {data['guild_id']}")
+            conn.commit()
 
         cursor.execute("INSERT OR REPLACE INTO guild (guild_id, unauth_role_id, auth_role_id, reauth_day) VALUES (?, ?, ?, ?)",
                     (data['guild_id'], data['unauth_role'], data['auth_role'], data['reauth_day']))
         conn.commit()
 
-    return web.json_response({"message": "Guild data added successfully!"})
+    return web.json_response({"message": "Guild data added successfully!"}, status=200)
 
 async def delete_guild_data(request):
     if not check_api_key(request):
@@ -386,7 +410,7 @@ def AddUserToServer(user_id:int): #根據使用者ID將使用者加入Zeitfrei�
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         user_data = cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-        guild_data = cursor.execute("SELECT * FROM guild").fetchall()
+        guild_data = cursor.execute("SELECT * FROM guild WHERE guild_id = ?", (308120017201922048,)).fetchall()
 
     headers = {
         'Authorization': f"Bot {BOT_TOKEN}",
@@ -399,14 +423,41 @@ def AddUserToServer(user_id:int): #根據使用者ID將使用者加入Zeitfrei�
 
     response = requests.put(f"https://discord.com/api/guilds/308120017201922048/members/{user_id}", headers=headers, json=data)
     if response.status_code == 201:
-        print(f"{user_data[1]}已加入伺服器")
-    for data in guild_data:
-        guild_id = data[0]
-        unauth_role_id = data[1]
-        auth_role_id = data[2]
-        requests.put(f"https://discord.com/api/guilds/{guild_id}/members/{user_id}/roles/{auth_role_id}", headers=headers)
-        if guild_id != unauth_role_id: #判斷是否為everyone身分組
-            requests.delete(f"https://discord.com/api/guilds/{guild_id}/members/{user_id}/roles/{unauth_role_id}", headers=headers)
+        print(f"{user_data[1]}已加入伺服器") #408967202948120578
+
+    unauth_role_data = []
+    auth_role_data = []
+    for row in guild_data:
+        if row[1] not in unauth_role_data:
+            unauth_role_data.append(row[1])
+        if row[2] not in auth_role_data:
+            auth_role_data.append(row[2])
+
+    for role_id in unauth_role_data:
+        while True:
+            response = requests.delete(
+                f"https://discord.com/api/guilds/308120017201922048/members/{user_id}/roles/{role_id}",
+                headers=headers)
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 1))
+                print(f"Rate limited, retrying after {retry_after} ms...")
+                time.sleep(retry_after * 0.001)
+            else:
+                break
+
+    for role_id in auth_role_data:
+        while True:
+            response = requests.put(
+                f"https://discord.com/api/guilds/308120017201922048/members/{user_id}/roles/{role_id}",
+                headers=headers)
+
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 1))
+                print(f"Rate limited, retrying after {retry_after} ms...")
+                time.sleep(retry_after * 0.001)
+            else:
+                break
+
     return response
 
 def change_user_nickname(user):
@@ -415,7 +466,7 @@ def change_user_nickname(user):
         'Content-Type': 'application/json'
     }
     nickname_data = {
-        "nick": "｜" + user['username']
+        "nick": "〡" + user['username']
     }
     requests.patch(f"https://discord.com/api/guilds/308120017201922048/members/{user['id']}",headers=headers,json=nickname_data)
 
