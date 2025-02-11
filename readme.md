@@ -3,7 +3,7 @@
 本文件描述 Zeitfrei 用於機器人驗證的 REST API 使用方法，目前由 Evanlau 開發與維護。
 
 ### 連線方法
-API 網址為 oauth.zeitfrei.tw ，向此端點發送請求以開始使用 API 。
+API 網址為 oauth.zeitfrei.uk ，向此端點發送請求以開始使用 API 。
 
 ### 安全金鑰
 
@@ -24,11 +24,11 @@ API 網址為 oauth.zeitfrei.tw ，向此端點發送請求以開始使用 API �
 
 - **描述**: 將使用者重定向至 Discord OAuth2 授權頁面。
 - **參數**: 無
-- **連結**: [https://oauth.zeitfrei.tw](https://oauth.zeitfrei.tw)
+- **連結**: [https://oauth.zeitfrei.uk](oauth.zeitfrei.uk)
 - **用途**:
     - 萬用的網址，會重新導向到 `Qlipoth` 的 OAuth 授權頁面
     - 也可以用以下連結在 Discord 內直接完成授權：
-      [Discord OAuth2 授權連結](https://discord.com/api/oauth2/authorize?client_id=1092062648784404550&redirect_uri=https://oauth.zeitfrei.tw/callback&&response_type=code&scope=guilds%20email%20guilds.join%20identify)
+      [Discord OAuth2 授權連結](https://discord.com/api/oauth2/authorize?client_id=1092062648784404550&redirect_uri=https://oauth.zeitfrei.uk/callback&&response_type=code&scope=guilds%20email%20guilds.join%20identify)
 
 
 #### `/user/{user_id}` (GET)
